@@ -1,0 +1,192 @@
+---
+description: Guidelines for implementing Next.js server actions
+globs: 
+alwaysApply: false
+---
+---
+description: Use next-safe-action when implementing server actions to ensure type safety, validation, and proper error handling
+globs: apps/web/utils/actions/**/*.{ts,js}
+tags: [server-actions, next, next-safe-action, mutations]
+priority: 2
+version: 1.0.0
+---
+
+# Server Actions
+
+## Context
+- When implementing data mutations (create, update, delete operations)
+- When handling form submissions
+- When executing server-side operations from client components
+- When requiring authenticated user context for operations
+
+## Requirements
+- Create server actions in dedicated files following the established file structure pattern
+- Use `next-safe-action` library for all server actions
+- Separate validation schemas into `.validation.ts` files using Zod
+- Choose the appropriate action client based on context requirements:
+  - `actionClientUser`: For actions requiring only authenticated user context
+  - `actionClient`: For actions requiring both user context and emailAccountId
+  - `adminActionClient`: For actions restricted to admin users
+- Include metadata for monitoring using `.metadata({ name: "actionName" })`
+- Use server actions ONLY for mutations, never for data fetching
+- Implement proper error handling using the built-in mechanisms
+- Use cache invalidation with `revalidatePath` or `revalidateTag` when appropriate
+
+## Examples
+
+<example>
+File structure:
+```
+apps/web/utils/actions/
+├── NAME.validation.ts  // Zod schemas
+└── NAME.ts             // Server action implementations
+```
+
+Validation file (settings.validation.ts):
+```typescript
+import { z } from "zod";
+
+// Schema for updating AI settings
+export const saveAiSettingsBody = z.object({
+  aiProvider: z.string().optional(),
+  aiModel: z.string().optional(),
+  aiApiKey: z.string().optional(),
+});
+export type SaveAiSettingsBody = z.infer<typeof saveAiSettingsBody>;
+```
+
+Server action file (settings.ts):
+```typescript
+"use server";
+
+import { actionClientUser } from "@/utils/actions/safe-action";
+import { saveAiSettingsBody } from "@/utils/actions/settings.validation";
+import prisma from "@/utils/prisma";
+import { revalidatePath } from "next/cache";
+
+export const updateAiSettingsAction = actionClientUser
+  .metadata({ name: "updateAiSettings" })
+  .schema(saveAiSettingsBody)
+  .action(
+    async ({
+      ctx: { userId },
+      parsedInput: { aiProvider, aiModel, aiApiKey },
+    }) => {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { aiProvider, aiModel, aiApiKey },
+      });
+      
+      revalidatePath("/settings");
+      return { success: true };
+    },
+  );
+```
+
+Client usage:
+```typescript
+import { updateAiSettingsAction } from "@/utils/actions/settings";
+
+const SettingsForm = () => {
+  const onSubmit = async (data) => {
+    const result = await updateAiSettingsAction(data);
+    
+    if (result.serverError) {
+      // Handle error
+    } else {
+      // Handle success
+    }
+  };
+  
+  return (/* Form JSX */);
+};
+```
+</example>
+
+<example type="invalid">
+```typescript
+// DON'T use server actions for data fetching
+"use server";
+
+import { actionClientUser } from "@/utils/actions/safe-action";
+import prisma from "@/utils/prisma";
+
+export const getUserSettingsAction = actionClientUser
+  .metadata({ name: "getUserSettings" })
+  .schema(z.object({}))
+  .action(async ({ ctx: { userId } }) => {
+    // WRONG: Using server action for data fetching
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { aiProvider: true, aiModel: true },
+    });
+    
+    return user;
+  });
+```
+
+Instead, use a GET API route with SWR:
+```typescript
+// api/user/settings/route.ts
+import { NextResponse } from "next/server";
+import prisma from "@/utils/prisma";
+import { withAuth } from "@/utils/middleware";
+
+export type GetUserSettingsResponse = Awaited<ReturnType<typeof getData>>;
+
+export const GET = withAuth(async (request) => {
+  const userId = request.auth.userId;
+  const result = await getData({ userId });
+  return NextResponse.json(result);
+});
+
+async function getData({ userId }: { userId: string }) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { aiProvider: true, aiModel: true },
+  });
+  return user;
+}
+```
+</example>
+
+## Implementation Notes
+
+### Action Client Selection
+- **actionClientUser**: Use when only needing the user's ID
+  ```typescript
+  export const updateUserProfileAction = actionClientUser
+    .metadata({ name: "updateUserProfile" })
+    .schema(profileSchema)
+    .action(async ({ ctx: { userId }, parsedInput }) => {
+      // Implementation using userId
+    });
+  ```
+
+- **actionClient**: Use when needing both user context and emailAccountId
+  ```typescript
+  export const updateEmailSettingsAction = actionClient
+    .metadata({ name: "updateEmailSettings" })
+    .schema(emailSettingsSchema)
+    .action(async ({ ctx: { emailAccountId }, parsedInput }) => {
+      // Implementation using emailAccountId
+    });
+  
+  // Client binding:
+  const result = await updateEmailSettingsAction({ 
+    emailAccountId: "123", 
+    ...formData 
+  });
+  ```
+
+- **adminActionClient**: Use for admin-only actions
+  ```typescript
+  export const adminUserManagementAction = adminActionClient
+    .metadata({ name: "adminUserManagement" })
+    .schema(adminSchema)
+    .action(async ({ ctx: { userId }, parsedInput }) => {
+      // Admin-only implementation
+    });
+  ```
+
+For data fetching operations, refer to [GET API Routes](mdc:.cursor/rules/202-api-routes) and [Data Fetching](mdc:.cursor/rules/data-fetching.mdc) rules.
