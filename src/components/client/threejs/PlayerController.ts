@@ -15,9 +15,21 @@ export class PlayerController {
 
   private domElement: HTMLCanvasElement;
 
-  constructor(camera: THREE.PerspectiveCamera, domElement: HTMLCanvasElement) {
+  // Collision detection properties
+  private scene: THREE.Scene;
+  private playerHeight = 1.6; // Typical eye level
+  private playerRadius = 0.3; // Collision radius
+  private raycaster = new THREE.Raycaster();
+  private collisionDistance = 0.5; // How close we can get to objects
+
+  constructor(
+    camera: THREE.PerspectiveCamera,
+    domElement: HTMLCanvasElement,
+    scene: THREE.Scene
+  ) {
     this.camera = camera;
     this.domElement = domElement;
+    this.scene = scene; // Store scene reference for collision detection
     this.controls = new PointerLockControls(this.camera, this.domElement);
 
     // Add listeners for pointer lock
@@ -87,6 +99,57 @@ export class PlayerController {
     }
   }
 
+  // Check if movement in a given direction would cause a collision
+  private checkCollision(direction: THREE.Vector3): boolean {
+    if (!this.scene) return false; // Safety check
+
+    // Calculate player position (at feet level, not eye level)
+    const playerPosition = new THREE.Vector3();
+    this.camera.getWorldPosition(playerPosition);
+    playerPosition.y -= this.playerHeight; // Adjust from eye level to feet level
+
+    // Send rays in movement direction from a few points around the player
+    // This creates a more robust collision detection than a single ray
+    const angles = [
+      0,
+      Math.PI / 4,
+      Math.PI / 2,
+      (3 * Math.PI) / 4,
+      Math.PI,
+      (5 * Math.PI) / 4,
+      (3 * Math.PI) / 2,
+      (7 * Math.PI) / 4,
+    ];
+
+    for (const angle of angles) {
+      // Calculate ray origin point around player's cylinder
+      const rayOrigin = new THREE.Vector3(
+        playerPosition.x + Math.sin(angle) * this.playerRadius,
+        playerPosition.y + this.playerHeight / 2, // Middle of player height
+        playerPosition.z + Math.cos(angle) * this.playerRadius
+      );
+
+      // Set ray direction to movement direction
+      this.raycaster.set(rayOrigin, direction.clone().normalize());
+
+      // Check for intersections
+      const intersections = this.raycaster.intersectObjects(
+        this.scene.children,
+        true
+      );
+
+      // If we found a close intersection, we have a collision
+      if (
+        intersections.length > 0 &&
+        intersections[0].distance < this.collisionDistance
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   public update(): void {
     if (!this.controls.isLocked) {
       // If pointer is not locked, reset movement flags and velocity to prevent drifting
@@ -112,10 +175,31 @@ export class PlayerController {
 
     const speed = 40.0; // units per second
 
-    if (this.moveForward || this.moveBackward)
-      this.velocity.z -= this.direction.z * speed * delta;
-    if (this.moveLeft || this.moveRight)
-      this.velocity.x -= this.direction.x * speed * delta;
+    // Convert direction to world space (adjusting for camera rotation)
+    const moveDirection = new THREE.Vector3();
+    if (this.moveForward || this.moveBackward) {
+      moveDirection.z = -this.direction.z;
+      moveDirection.applyQuaternion(this.camera.quaternion);
+      moveDirection.y = 0; // Keep movement horizontal
+      moveDirection.normalize();
+
+      // Only apply movement if no collision is detected
+      if (!this.checkCollision(moveDirection)) {
+        this.velocity.z -= this.direction.z * speed * delta;
+      }
+    }
+
+    if (this.moveLeft || this.moveRight) {
+      moveDirection.x = -this.direction.x;
+      moveDirection.applyQuaternion(this.camera.quaternion);
+      moveDirection.y = 0; // Keep movement horizontal
+      moveDirection.normalize();
+
+      // Only apply movement if no collision is detected
+      if (!this.checkCollision(moveDirection)) {
+        this.velocity.x -= this.direction.x * speed * delta;
+      }
+    }
 
     this.controls.moveRight(-this.velocity.x * delta);
     this.controls.moveForward(-this.velocity.z * delta);
@@ -141,5 +225,7 @@ export class PlayerController {
     document.removeEventListener('keyup', this.onKeyUp.bind(this));
     // Remove click listener from domElement if it was added for locking
     // No explicit removal for domElement click, PointerLockControls handles its own listeners internally
+    // Clean up collision detection resources
+    this.raycaster = null!;
   }
 }

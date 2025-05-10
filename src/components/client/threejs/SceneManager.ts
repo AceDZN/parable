@@ -18,7 +18,10 @@ export class SceneManager {
       0.1,
       1000
     );
-    this.camera.position.set(0, 1.6, 5); // Typical eye-level height and distance
+
+    this.camera.position.set(-0.5, 1.6, 0.5);
+
+    this.camera.lookAt(new THREE.Vector3(-0.7, 1.4, -1));
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(this.mount.clientWidth, this.mount.clientHeight);
@@ -31,20 +34,50 @@ export class SceneManager {
   }
 
   private addLights(): void {
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     this.scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    const directionalLight = new THREE.DirectionalLight(0xffffee, 0.8);
     directionalLight.position.set(5, 10, 7.5);
     directionalLight.castShadow = true;
-    directionalLight.shadow.mapSize.width = 1024;
-    directionalLight.shadow.mapSize.height = 1024;
+    directionalLight.shadow.mapSize.width = 2048;
+    directionalLight.shadow.mapSize.height = 2048;
     directionalLight.shadow.camera.near = 0.5;
     directionalLight.shadow.camera.far = 50;
+    directionalLight.shadow.camera.left = -15;
+    directionalLight.shadow.camera.right = 15;
+    directionalLight.shadow.camera.top = 15;
+    directionalLight.shadow.camera.bottom = -15;
     this.scene.add(directionalLight);
 
-    const hemisphereLight = new THREE.HemisphereLight(0xffffbb, 0x080820, 0.7);
+    const hemisphereLight = new THREE.HemisphereLight(0xffffbb, 0x080820, 0.5);
     this.scene.add(hemisphereLight);
+
+    this.addOfficeLights();
+  }
+
+  private addOfficeLights(): void {
+    const createCeilingLight = (x: number, z: number) => {
+      const lightColor = 0xffffee;
+      const pointLight = new THREE.PointLight(lightColor, 0.5, 8, 2);
+      pointLight.position.set(x, 2.9, z);
+      pointLight.castShadow = false;
+      this.scene.add(pointLight);
+
+      const lightFixture = new THREE.Mesh(
+        new THREE.BoxGeometry(0.6, 0.1, 0.6),
+        new THREE.MeshBasicMaterial({ color: lightColor })
+      );
+      lightFixture.position.copy(pointLight.position);
+      this.scene.add(lightFixture);
+    };
+
+    createCeilingLight(0, 0);
+    createCeilingLight(-3, 3);
+    createCeilingLight(3, 3);
+    createCeilingLight(0, 6);
+    createCeilingLight(-3, -3);
+    createCeilingLight(3, -3);
   }
 
   public getScene(): THREE.Scene {
@@ -72,8 +105,20 @@ export class SceneManager {
 
   public dispose(): void {
     this.renderer.dispose();
-    // Any other cleanup specific to scene manager resources
-    // For example, if you added event listeners directly here
+    this.scene.traverse((object) => {
+      if ((object as THREE.Mesh).isMesh) {
+        const mesh = object as THREE.Mesh;
+        if (mesh.geometry) mesh.geometry.dispose();
+        if (mesh.material) {
+          if (Array.isArray(mesh.material)) {
+            mesh.material.forEach((material) => material.dispose());
+          } else {
+            mesh.material.dispose();
+          }
+        }
+      }
+    });
+
     if (this.renderer.domElement.parentNode === this.mount) {
       this.mount.removeChild(this.renderer.domElement);
     }

@@ -4,6 +4,8 @@ import React, { useRef, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
 import { SceneManager } from './SceneManager';
 import { PlayerController } from './PlayerController';
+import { CorporateOfficeEnvironment } from './environments/CorporateOfficeEnvironment';
+import { GUI } from 'lil-gui';
 
 // We will create CorporateOfficeEnvironment later
 // import { CorporateOfficeEnvironment } from './environments/CorporateOfficeEnvironment';
@@ -17,12 +19,17 @@ export const ThreeJSEnvironment: React.FC<ThreeJSEnvironmentProps> = () => {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneManagerRef = useRef<SceneManager | null>(null);
   const playerControllerRef = useRef<PlayerController | null>(null);
-  // const officeEnvironmentRef = useRef<CorporateOfficeEnvironment | null>(null);
+  const officeEnvironmentRef = useRef<CorporateOfficeEnvironment | null>(null);
+  const guiRef = useRef<GUI | null>(null);
 
   const initializeScene = useCallback(() => {
     if (!mountRef.current) return;
 
     const currentMount = mountRef.current;
+
+    // Initialize GUI
+    const gui = new GUI();
+    guiRef.current = gui;
 
     // Initialize SceneManager
     const sceneManager = new SceneManager(currentMount);
@@ -31,30 +38,28 @@ export const ThreeJSEnvironment: React.FC<ThreeJSEnvironmentProps> = () => {
     // Initialize PlayerController
     const playerController = new PlayerController(
       sceneManager.getCamera(),
-      sceneManager.getRenderer().domElement
+      sceneManager.getRenderer().domElement,
+      sceneManager.getScene()
     );
     playerControllerRef.current = playerController;
 
-    // Initialize and add environment (example)
-    // For now, let's add a simple cube to verify setup
-    const geometry = new THREE.BoxGeometry();
-    const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
-    const cube = new THREE.Mesh(geometry, material);
-    cube.position.y = 0.5; // Place it on the ground
-    sceneManager.getScene().add(cube);
+    // Initialize and load the office environment, passing the GUI instance
+    const officeEnv = new CorporateOfficeEnvironment(
+      sceneManager.getScene(),
+      gui
+    );
+    officeEnv.load();
+    officeEnvironmentRef.current = officeEnv;
 
-    // Add a simple ground plane
-    const groundGeometry = new THREE.PlaneGeometry(10, 10);
-    const groundMaterial = new THREE.MeshStandardMaterial({
-      color: 0x808080,
-      side: THREE.DoubleSide,
-    });
-    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-    ground.rotation.x = -Math.PI / 2; // Rotate to be horizontal
-    sceneManager.getScene().add(ground);
-
-    // officeEnvironmentRef.current = new CorporateOfficeEnvironment(sceneManager.getScene());
-    // officeEnvironmentRef.current.load();
+    // Remove placeholder cube and ground - the environment handles its own floor
+    const placeholderCube = sceneManager
+      .getScene()
+      .getObjectByName('PlaceholderCube');
+    if (placeholderCube) sceneManager.getScene().remove(placeholderCube);
+    const placeholderGround = sceneManager
+      .getScene()
+      .getObjectByName('PlaceholderGround');
+    if (placeholderGround) sceneManager.getScene().remove(placeholderGround);
 
     // Start animation loop
     const animate = () => {
@@ -67,8 +72,8 @@ export const ThreeJSEnvironment: React.FC<ThreeJSEnvironmentProps> = () => {
 
     // Resize listener
     const handleResize = () => {
-      if (sceneManager) {
-        sceneManager.onWindowResize();
+      if (sceneManagerRef.current) {
+        sceneManagerRef.current.onWindowResize();
       }
     };
     window.addEventListener('resize', handleResize);
@@ -79,22 +84,21 @@ export const ThreeJSEnvironment: React.FC<ThreeJSEnvironmentProps> = () => {
       if (playerControllerRef.current) {
         playerControllerRef.current.dispose();
       }
+      if (officeEnvironmentRef.current) {
+        officeEnvironmentRef.current.dispose(); // Dispose of environment assets
+      }
       if (sceneManagerRef.current) {
         sceneManagerRef.current.dispose();
       }
-      if (currentMount && sceneManagerRef.current) {
-        // Check if domElement exists before trying to remove
-        if (
-          sceneManagerRef.current.getRenderer().domElement.parentNode ===
-          currentMount
-        ) {
-          currentMount.removeChild(
-            sceneManagerRef.current.getRenderer().domElement
-          );
-        }
+      if (guiRef.current) {
+        guiRef.current.destroy();
+        guiRef.current = null;
       }
+      // No need to removeChild here if SceneManager.dispose() handles it
+      // and mountRef might be unmounted by React anyway
       sceneManagerRef.current = null;
       playerControllerRef.current = null;
+      officeEnvironmentRef.current = null;
     };
   }, []);
 
