@@ -1,64 +1,36 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, query, limit } from 'firebase/firestore';
+interface FirebaseTestStatus {
+  loading: boolean;
+  success: boolean;
+  error?: string;
+  data?: any;
+}
 
-export default function FirebaseTestPage() {
-  const [status, setStatus] = useState<{
-    loading: boolean;
-    success?: boolean;
-    error?: string;
-    data?: any;
-  }>({ loading: true });
+interface FirebaseTestClientProps {
+  initialStatus: FirebaseTestStatus;
+}
 
-  useEffect(() => {
-    async function testConnection() {
-      try {
-        // Test connection
-        const storiesCollection = collection(db, 'stories');
-        const snapshot = await getDocs(query(storiesCollection, limit(1)));
-
-        setStatus({
-          loading: false,
-          success: true,
-          data: {
-            documentsCount: snapshot.size,
-            connectionEstablished: true,
-          },
-        });
-      } catch (error: any) {
-        console.error('Firebase connection error:', error);
-        setStatus({
-          loading: false,
-          success: false,
-          error: error.message || 'Unknown error occurred',
-        });
-      }
-    }
-
-    testConnection();
-  }, []);
-
+export function FirebaseTestClient({ initialStatus }: FirebaseTestClientProps) {
   return (
     <div className="container mx-auto max-w-3xl p-6">
       <h1 className="text-2xl font-bold mb-6">Firebase Connection Test</h1>
 
-      {status.loading ? (
+      {initialStatus.loading ? (
         <div className="p-4 bg-blue-50 text-blue-700 rounded-md">
           Testing connection to Firebase...
         </div>
-      ) : status.success ? (
+      ) : initialStatus.success ? (
         <div className="p-4 bg-green-50 text-green-700 rounded-md">
           <h2 className="font-semibold text-xl mb-2">Connection Successful!</h2>
           <pre className="bg-gray-100 p-3 rounded text-sm overflow-x-auto">
-            {JSON.stringify(status.data, null, 2)}
+            {JSON.stringify(initialStatus.data, null, 2)}
           </pre>
         </div>
       ) : (
         <div className="p-4 bg-red-50 text-red-700 rounded-md">
           <h2 className="font-semibold text-xl mb-2">Connection Failed</h2>
-          <p className="mb-2">{status.error}</p>
+          <p className="mb-2">{initialStatus.error}</p>
           <p className="text-sm">
             Please check your Firebase configuration in <code>.env.local</code>{' '}
             file and make sure you have the correct API keys and permissions.

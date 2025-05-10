@@ -14,7 +14,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
-export default function CreateStoryPage() {
+export function CreateStoryClient() {
   const [generatedStory, setGeneratedStory] = useState<StoryOutputType | null>(
     null
   );
