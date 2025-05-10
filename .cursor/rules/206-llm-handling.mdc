@@ -1,5 +1,5 @@
 ---
-description: 
+description: Generate content using LLM
 globs: 
 alwaysApply: false
 ---
