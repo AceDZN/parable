@@ -1,4 +1,4 @@
-import { StoryOutputType } from '@/lib/api-client';
+import { StoryOutputType, SavedStory } from '@/lib/api-client';
 import {
   Card,
   CardContent,
@@ -9,20 +9,45 @@ import {
 } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
-import { Download, PlayCircle } from 'lucide-react';
+import { Download, PlayCircle, Save, RefreshCw, Check } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useState } from 'react';
 
 interface StoryDisplayProps {
   story: StoryOutputType;
   showActions?: boolean;
   onStartExperience?: () => void;
+  onSaveStory?: (title?: string) => Promise<SavedStory | null>;
+  onCreateNew?: () => void;
+  isSaving?: boolean;
+  isSaved?: boolean;
 }
 
 export function StoryDisplay({
   story,
   showActions = false,
   onStartExperience,
+  onSaveStory,
+  onCreateNew,
+  isSaving = false,
+  isSaved = false,
 }: StoryDisplayProps) {
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [storyTitle, setStoryTitle] = useState(
+    `${story.characterName}'s Story`
+  );
+
   const handleExport = () => {
     try {
       // Create a JSON string of the story
@@ -49,6 +74,13 @@ export function StoryDisplay({
     } catch (error) {
       console.error('Error exporting story:', error);
       toast.error('Failed to export story');
+    }
+  };
+
+  const handleSaveWithTitle = async () => {
+    if (onSaveStory) {
+      await onSaveStory(storyTitle);
+      setIsDialogOpen(false);
     }
   };
 
@@ -98,20 +130,98 @@ export function StoryDisplay({
       </CardContent>
 
       {showActions && (
-        <CardFooter className="flex justify-between pt-4">
-          <Button
-            variant="outline"
-            onClick={handleExport}
-            className="flex items-center"
-          >
-            <Download className="mr-2 h-4 w-4" />
-            Export Story
-          </Button>
+        <CardFooter className="flex justify-between pt-4 flex-wrap gap-2">
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={handleExport}
+              className="flex items-center"
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Export
+            </Button>
 
-          <Button onClick={onStartExperience} className="flex items-center">
-            <PlayCircle className="mr-2 h-4 w-4" />
-            Start Experience
-          </Button>
+            {onCreateNew && (
+              <Button
+                variant="outline"
+                onClick={onCreateNew}
+                className="flex items-center"
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                New Story
+              </Button>
+            )}
+          </div>
+
+          <div className="flex gap-2">
+            {onSaveStory && !isSaved && (
+              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button
+                    variant="secondary"
+                    disabled={isSaving}
+                    className="flex items-center"
+                  >
+                    {isSaving ? (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="mr-2 h-4 w-4" />
+                        Save Story
+                      </>
+                    )}
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Save Your Story</DialogTitle>
+                    <DialogDescription>
+                      Give your story a title so you can easily find it later.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="py-4">
+                    <Label htmlFor="title">Story Title</Label>
+                    <Input
+                      id="title"
+                      value={storyTitle}
+                      onChange={(e) => setStoryTitle(e.target.value)}
+                      className="mt-2"
+                    />
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      onClick={() => setIsDialogOpen(false)}
+                      variant="outline"
+                    >
+                      Cancel
+                    </Button>
+                    <Button onClick={handleSaveWithTitle} disabled={isSaving}>
+                      {isSaving ? 'Saving...' : 'Save Story'}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            )}
+
+            {isSaved && (
+              <Button
+                variant="secondary"
+                disabled
+                className="flex items-center"
+              >
+                <Check className="mr-2 h-4 w-4" />
+                Saved
+              </Button>
+            )}
+
+            <Button onClick={onStartExperience} className="flex items-center">
+              <PlayCircle className="mr-2 h-4 w-4" />
+              Start Experience
+            </Button>
+          </div>
         </CardFooter>
       )}
     </Card>

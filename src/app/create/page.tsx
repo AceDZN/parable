@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { StoryCreationForm } from '@/components/forms/StoryCreationForm';
 import { StoryDisplay } from '@/components/StoryDisplay';
-import { StoryOutputType } from '@/lib/api-client';
+import { StoryOutputType, SavedStory, saveStory } from '@/lib/api-client';
 import {
   Card,
   CardHeader,
@@ -12,12 +12,15 @@ import {
   CardContent,
 } from '@/components/ui/card';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 
 export default function CreateStoryPage() {
   const [generatedStory, setGeneratedStory] = useState<StoryOutputType | null>(
     null
   );
+  const [savedStory, setSavedStory] = useState<SavedStory | null>(null);
   const [isCreating, setIsCreating] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const router = useRouter();
 
   const handleStoryCreated = (story: StoryOutputType) => {
@@ -27,14 +30,56 @@ export default function CreateStoryPage() {
 
   const handleCreateNew = () => {
     setGeneratedStory(null);
+    setSavedStory(null);
     setIsCreating(true);
   };
 
-  const handleStartExperience = () => {
-    // In a real implementation, this would navigate to the experience page with the story ID
-    // For now, we'll just navigate to a dummy URL
+  const handleSaveStory = async (title?: string) => {
+    if (!generatedStory) return null;
+
+    try {
+      setIsSaving(true);
+      const story = await saveStory(generatedStory, title);
+      setSavedStory(story);
+      toast.success('Story saved!', {
+        description: 'Your story has been saved successfully.',
+      });
+      return story;
+    } catch (error) {
+      console.error('Error saving story:', error);
+      toast.error('Failed to save story', {
+        description: 'There was an error saving your story. Please try again.',
+      });
+      return null;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleStartExperience = async () => {
+    // If we have a saved story, navigate to the experience page with the story ID
+    if (savedStory) {
+      router.push(`/experience?storyId=${savedStory.id}`);
+      return;
+    }
+
+    // If we have a generated story but it's not saved yet, save it first
     if (generatedStory) {
-      router.push(`/experience?storyId=story_${Date.now()}`);
+      try {
+        setIsSaving(true);
+        const story = await saveStory(generatedStory);
+        if (story) {
+          router.push(`/experience?storyId=${story.id}`);
+        }
+      } catch (error) {
+        console.error('Error saving story before experience:', error);
+        toast.error('Failed to save story', {
+          description:
+            'There was an error saving your story. Please try again.',
+        });
+      } finally {
+        setIsSaving(false);
+      }
     }
   };
 
@@ -73,6 +118,10 @@ export default function CreateStoryPage() {
                   story={generatedStory}
                   showActions={true}
                   onStartExperience={handleStartExperience}
+                  onSaveStory={handleSaveStory}
+                  isSaving={isSaving}
+                  isSaved={!!savedStory}
+                  onCreateNew={handleCreateNew}
                 />
               )}
             </CardContent>
