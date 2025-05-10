@@ -17,7 +17,7 @@ export class CorporateOfficeEnvironment {
 
   private defaultTransforms = {
     desk: {
-      position: new THREE.Vector3(-0.77, 0.48, 0.5),
+      position: new THREE.Vector3(-0.77, 0.48, -0.19),
       rotation: new THREE.Euler(0, 0, 0),
       scale: new THREE.Vector3(1.6, 1.6, 1.6),
     },
@@ -27,7 +27,7 @@ export class CorporateOfficeEnvironment {
       scale: new THREE.Vector3(0.4, 0.4, 0.4),
     },
     chair: {
-      position: new THREE.Vector3(0, 0.49, 0.9), // Relative to cubicle group
+      position: new THREE.Vector3(0, 0.49, 0.099), // Relative to cubicle group
       rotation: new THREE.Euler(0, 2.8, 0),
       scale: new THREE.Vector3(1, 1, 1),
     },
