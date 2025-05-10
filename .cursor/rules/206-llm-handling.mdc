@@ -22,7 +22,7 @@ alwaysApply: false
 
 ### Gemini LLM Configuration
 
-- Model: Use `gemini-1.5-flash` for fast, structured responses
+- Model: Use `gemini-2.0-flash` for fast, structured responses
 - Temperature: 
   - Lower (0.3-0.5) for factual/structured content
   - Medium (0.6-0.8) for creative/narrative content

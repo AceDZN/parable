@@ -1,15 +1,27 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  GoogleGenerativeAI,
-  HarmCategory,
-  HarmBlockThreshold,
-} from '@google/generative-ai';
 import { z } from 'zod';
+import {
+  generateStructuredContent,
+  storySchema,
+  defaultSafetySettings,
+} from '@/utils/ai';
 
-// Initialize the Gemini API client with the API key
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || '');
+// Define story data interface
+interface StoryData {
+  characterName: string;
+  profession: string;
+  workplace: string;
+  lifeFacts: Array<{
+    type: string;
+    content: string;
+  }>;
+  backstory: string;
+  primarySetting: string;
+  mood: string;
+  timePeriod: string;
+}
 
 // Define the story input schema for validation
 const storyInputSchema = z.object({
@@ -58,24 +70,7 @@ function createPrompt(partialStory = {}) {
     return `Generate a complete character profile and story setting for a narrative exploration game inspired by "The Stanley Parable".
 The character should be interesting with a detailed profession, workplace, and backstory. Include 3-5 life facts that define the character.
 The setting, mood, and time period should create an intriguing narrative environment.
-Make the backstory at least 100 words and ensure all details are cohesive.
-
-Format your response as a JSON object with the following fields:
-{
-  "characterName": "Character's full name",
-  "profession": "Character's profession or occupation",
-  "workplace": "Name of the character's workplace",
-  "lifeFacts": [
-    {
-      "type": "Category of the life fact (achievement, relationship, fear, etc.)",
-      "content": "Description of the specific life fact"
-    }
-  ],
-  "backstory": "Detailed backstory for the character (at least 100 words)",
-  "primarySetting": "Primary environmental setting for the narrative",
-  "mood": "Overall mood or tone of the narrative",
-  "timePeriod": "Era or time period for the narrative"
-}`;
+Make the backstory at least 100 words and ensure all details are cohesive.`;
   }
 
   // Create a prompt for partial data completion
@@ -85,43 +80,31 @@ Fill in any missing details and ensure all elements work cohesively together. Ma
 Provided partial profile:
 ${JSON.stringify(partialStory, null, 2)}
 
-Complete all missing fields with creative, detailed, and cohesive information that would make for an engaging narrative experience.
-
-Format your response as a JSON object with the following fields:
-{
-  "characterName": "Character's full name",
-  "profession": "Character's profession or occupation",
-  "workplace": "Name of the character's workplace",
-  "lifeFacts": [
-    {
-      "type": "Category of the life fact (achievement, relationship, fear, etc.)",
-      "content": "Description of the specific life fact"
-    }
-  ],
-  "backstory": "Detailed backstory for the character (at least 100 words)",
-  "primarySetting": "Primary environmental setting for the narrative",
-  "mood": "Overall mood or tone of the narrative",
-  "timePeriod": "Era or time period for the narrative"
-}`;
+Complete all missing fields with creative, detailed, and cohesive information that would make for an engaging narrative experience.`;
 }
 
 // Set a timeout for API requests
 const GENERATION_TIMEOUT = 30000; // 30 seconds
 
-/**
- * Wraps a promise with a timeout
- */
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`Request timed out after ${timeoutMs}ms`)),
-        timeoutMs
-      )
-    ),
-  ]);
-}
+// Define custom safety settings for story generation - slightly more permissive
+const storySafetySettings = [
+  {
+    category: 'HARM_CATEGORY_HARASSMENT',
+    threshold: 'BLOCK_ONLY_HIGH',
+  },
+  {
+    category: 'HARM_CATEGORY_HATE_SPEECH',
+    threshold: 'BLOCK_MEDIUM_AND_ABOVE',
+  },
+  {
+    category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+    threshold: 'BLOCK_MEDIUM_AND_ABOVE',
+  },
+  {
+    category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+    threshold: 'BLOCK_ONLY_HIGH',
+  },
+];
 
 // API route handler
 export async function POST(request: NextRequest) {
@@ -147,7 +130,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate input (if any)
-    let partialStory = {};
+    let partialStory = {} as any;
     if (Object.keys(body).length > 0) {
       const validationResult = storyInputSchema.safeParse(body);
       if (!validationResult.success) {
@@ -165,68 +148,28 @@ export async function POST(request: NextRequest) {
     // Create a prompt based on provided data
     const prompt = createPrompt(partialStory);
 
-    // Determine appropriate temperature based on input completeness
-    // Use lower temperature for more structured inputs
-    const hasStructuredInput = Object.keys(partialStory).length > 3;
-    const temperature = hasStructuredInput ? 0.6 : 0.8;
+    // Use our utility function to generate structured content
+    const temperature = 0.75;
+    const startTime = performance.now();
 
-    // Get the Gemini model with appropriate configuration
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
-      generationConfig: {
-        temperature,
-        topK: 40,
-        topP: 0.95,
-        maxOutputTokens: 2048,
-      },
-    });
-
-    // Define safety settings
-    const safetySettings = [
-      {
-        category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-        threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-      },
-      {
-        category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-        threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-      },
-      {
-        category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-        threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-      },
-      {
-        category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-        threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-      },
-    ];
-
-    // Generate content with structured output
-    const result = await withTimeout(
-      model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 2048,
-          responseMimeType: 'application/json',
-        },
-        safetySettings,
-      }),
-      GENERATION_TIMEOUT
-    );
-
-    // Get the response
-    const response = result.response;
-    const text = response.text();
-
-    // Parse and validate the JSON response
-    let storyData;
     try {
-      storyData = JSON.parse(text);
+      // Generate content with structured output
+      const storyData = await generateStructuredContent<StoryData>(
+        prompt,
+        storySchema,
+        {
+          temperature,
+          maxOutputTokens: 2048,
+          timeout: GENERATION_TIMEOUT,
+          model: 'gemini-2.0-flash',
+          safetySettings: storySafetySettings, // Use custom safety settings
+        }
+      );
 
-      // Validate output format against expected schema
+      const endTime = performance.now();
+      console.log(`Generation Time taken: ${endTime - startTime} milliseconds`);
+
+      // Validate output against expected schema
       const validationResult = storyOutputSchema.safeParse(storyData);
       if (!validationResult.success) {
         console.error(
@@ -241,55 +184,55 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
-    } catch (error) {
-      console.error('Failed to parse LLM response as JSON:', error);
+
+      // Log success for monitoring
+      console.log(
+        'Successfully generated story for',
+        storyData.characterName,
+        'working as a',
+        storyData.profession
+      );
+
+      return NextResponse.json(storyData);
+    } catch (error: any) {
+      console.error('Story generation error:', error);
+
+      // Provide more specific error messages based on error type
+      if (error.message?.includes('timed out')) {
+        return NextResponse.json(
+          {
+            error: 'Story generation timed out',
+            details: 'Please try again or use a simpler request',
+          },
+          { status: 504 }
+        );
+      }
+
+      if (error.message?.includes('safety')) {
+        return NextResponse.json(
+          {
+            error: 'Content filtered by safety settings',
+            details: 'Please modify your request',
+          },
+          { status: 400 }
+        );
+      }
+
+      // Generic error fallback
       return NextResponse.json(
         {
-          error: 'Failed to parse AI response',
-          details: 'The AI response was not valid JSON',
+          error: 'Failed to generate story',
+          details: error.message || 'Unknown error',
         },
         { status: 500 }
       );
     }
-
-    // Log success for monitoring
-    console.log(
-      'Successfully generated story for',
-      storyData.characterName,
-      'working as a',
-      storyData.profession
-    );
-
-    return NextResponse.json(storyData);
   } catch (error: any) {
-    console.error('Story generation error:', error);
-
-    // Provide more specific error messages based on error type
-    if (error.message?.includes('timed out')) {
-      return NextResponse.json(
-        {
-          error: 'Story generation timed out',
-          details: 'Please try again or use a simpler request',
-        },
-        { status: 504 }
-      );
-    }
-
-    if (error.message?.includes('safety')) {
-      return NextResponse.json(
-        {
-          error: 'Content filtered by safety settings',
-          details: 'Please modify your request',
-        },
-        { status: 400 }
-      );
-    }
-
-    // Generic error fallback
+    console.error('Route handler error:', error);
     return NextResponse.json(
       {
-        error: 'Failed to generate story',
-        details: error.message || 'Unknown error',
+        error: 'Internal server error',
+        details: error.message || 'An unexpected error occurred',
       },
       { status: 500 }
     );

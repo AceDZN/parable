@@ -1578,10 +1578,9 @@ export class BranchRegistry {
 
 The ContentGenerator class manages interactions with the LLM API to generate dynamic narrative content:
 
-````typescript
+```typescript
 // src/services/ContentGenerator.ts
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { NarrativeState } from '../types/state';
 import { UserProfile } from '../types/user';
 import {
@@ -1591,15 +1590,12 @@ import {
 } from '../types/narrative';
 import { PromptTemplates } from '../utils/promptTemplates';
 import { LLMResponseCache } from '../utils/cacheUtils';
+import { generateStructuredContent, Type, storySchema } from '../utils/ai';
 
 export class ContentGenerator {
-  private genAI: GoogleGenerativeAI;
-  private model: any;
   private cache: LLMResponseCache;
 
   constructor() {
-    this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-    this.model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     this.cache = new LLMResponseCache();
   }
 
@@ -1629,55 +1625,122 @@ export class ContentGenerator {
         prompt = PromptTemplates.initialStoryDefault();
       }
 
-      // Send request to LLM
-      const result = await this.model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 4096,
+      // Define the schema for initial story response
+      const initialStorySchema = {
+        type: Type.OBJECT,
+        properties: {
+          title: { type: Type.STRING },
+          opening_narration: { type: Type.STRING },
+          branches: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                name: { type: Type.STRING },
+                description: { type: Type.STRING },
+                theme: { type: Type.STRING },
+                key_moments: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                },
+              },
+              propertyOrdering: [
+                'id',
+                'name',
+                'description',
+                'theme',
+                'key_moments',
+              ],
+            },
+          },
+          initial_choices: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                text: { type: Type.STRING },
+                options: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      id: { type: Type.STRING },
+                      text: { type: Type.STRING },
+                      narratorResponse: { type: Type.STRING },
+                      branchImpact: {
+                        type: Type.OBJECT,
+                        properties: {
+                          branch: { type: Type.STRING },
+                          strength: { type: Type.INTEGER },
+                        },
+                        propertyOrdering: ['branch', 'strength'],
+                      },
+                      relationshipImpact: {
+                        type: Type.OBJECT,
+                        properties: {
+                          type: { type: Type.STRING },
+                          amount: { type: Type.INTEGER },
+                        },
+                        propertyOrdering: ['type', 'amount'],
+                      },
+                      nextSegment: { type: Type.STRING },
+                    },
+                    propertyOrdering: [
+                      'id',
+                      'text',
+                      'narratorResponse',
+                      'branchImpact',
+                      'relationshipImpact',
+                      'nextSegment',
+                    ],
+                  },
+                },
+              },
+              propertyOrdering: ['id', 'text', 'options'],
+            },
+          },
         },
-        safetySettings: [
-          {
-            category: 'HARM_CATEGORY_HARASSMENT',
-            threshold: 'BLOCK_MEDIUM_AND_ABOVE',
-          },
-          {
-            category: 'HARM_CATEGORY_HATE_SPEECH',
-            threshold: 'BLOCK_MEDIUM_AND_ABOVE',
-          },
-          {
-            category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-            threshold: 'BLOCK_MEDIUM_AND_ABOVE',
-          },
-          {
-            category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
-            threshold: 'BLOCK_MEDIUM_AND_ABOVE',
-          },
+        propertyOrdering: [
+          'title',
+          'opening_narration',
+          'branches',
+          'initial_choices',
         ],
-      });
+      };
 
-      const responseText = result.response.text();
+      // Define safety settings appropriate for narrative content
+      const safetySettings = [
+        {
+          category: 'HARM_CATEGORY_HARASSMENT',
+          threshold: 'BLOCK_ONLY_HIGH',
+        },
+        {
+          category: 'HARM_CATEGORY_HATE_SPEECH',
+          threshold: 'BLOCK_MEDIUM_AND_ABOVE',
+        },
+        {
+          category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+          threshold: 'BLOCK_MEDIUM_AND_ABOVE',
+        },
+        {
+          category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+          threshold: 'BLOCK_ONLY_HIGH',
+        },
+      ];
 
-      // Parse JSON response
-      let responseData: InitialStoryResponse;
-
-      try {
-        // Attempt to extract JSON if the response is wrapped in text
-        const jsonMatch =
-          responseText.match(/```json\n([\s\S]*?)\n```/) ||
-          responseText.match(/{[\s\S]*}/);
-
-        const jsonString = jsonMatch
-          ? jsonMatch[1] || jsonMatch[0]
-          : responseText;
-        responseData = JSON.parse(jsonString);
-      } catch (parseError) {
-        console.error('Error parsing LLM response:', parseError);
-        // Fallback to default structure
-        responseData = this.getDefaultInitialStory();
-      }
+      // Send request to LLM using our utility function
+      const responseData =
+        await generateStructuredContent<InitialStoryResponse>(
+          prompt,
+          initialStorySchema,
+          {
+            temperature: 0.7,
+            maxOutputTokens: 4096,
+            safetySettings,
+          }
+        );
 
       // Cache the response
       await this.cache.set(cacheKey, responseData, 86400); // Cache for 24 hours
@@ -1795,42 +1858,118 @@ export class ContentGenerator {
         state.currentBranch
       );
 
-      // Send request to LLM
-      const result = await this.model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 1024,
+      // Define interaction response schema
+      const interactionSchema = {
+        type: Type.OBJECT,
+        properties: {
+          response: { type: Type.STRING },
+          environmentModifications: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                objectId: { type: Type.STRING },
+                type: { type: Type.STRING },
+                value: { type: Type.STRING },
+              },
+              propertyOrdering: ['objectId', 'type', 'value'],
+            },
+            nullable: true,
+          },
+          personalReference: {
+            type: Type.OBJECT,
+            properties: {
+              elementId: { type: Type.STRING },
+              elementType: { type: Type.STRING },
+              referenceType: { type: Type.STRING },
+            },
+            propertyOrdering: ['elementId', 'elementType', 'referenceType'],
+            nullable: true,
+          },
+          revealedChoice: {
+            type: Type.OBJECT,
+            properties: {
+              id: { type: Type.STRING },
+              text: { type: Type.STRING },
+              options: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    id: { type: Type.STRING },
+                    text: { type: Type.STRING },
+                    narratorResponse: { type: Type.STRING },
+                    branchImpact: {
+                      type: Type.OBJECT,
+                      properties: {
+                        branch: { type: Type.STRING },
+                        strength: { type: Type.INTEGER },
+                      },
+                      propertyOrdering: ['branch', 'strength'],
+                    },
+                    relationshipImpact: {
+                      type: Type.OBJECT,
+                      properties: {
+                        type: { type: Type.STRING },
+                        amount: { type: Type.INTEGER },
+                      },
+                      propertyOrdering: ['type', 'amount'],
+                    },
+                    nextSegment: { type: Type.STRING },
+                  },
+                  propertyOrdering: [
+                    'id',
+                    'text',
+                    'narratorResponse',
+                    'branchImpact',
+                    'relationshipImpact',
+                    'nextSegment',
+                  ],
+                },
+              },
+            },
+            propertyOrdering: ['id', 'text', 'options'],
+            nullable: true,
+          },
         },
-      });
+        propertyOrdering: [
+          'response',
+          'environmentModifications',
+          'personalReference',
+          'revealedChoice',
+        ],
+      };
 
-      const responseText = result.response.text();
+      // Custom safety settings for interaction responses
+      const safetySettings = [
+        {
+          category: 'HARM_CATEGORY_HARASSMENT',
+          threshold: 'BLOCK_ONLY_HIGH',
+        },
+        {
+          category: 'HARM_CATEGORY_HATE_SPEECH',
+          threshold: 'BLOCK_MEDIUM_AND_ABOVE',
+        },
+        {
+          category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+          threshold: 'BLOCK_MEDIUM_AND_ABOVE',
+        },
+        {
+          category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+          threshold: 'BLOCK_ONLY_HIGH',
+        },
+      ];
 
-      // Parse JSON response
-      let responseData: InteractionResponse;
-
-      try {
-        // Attempt to extract JSON
-        const jsonMatch =
-          responseText.match(/```json\n([\s\S]*?)\n```/) ||
-          responseText.match(/{[\s\S]*}/);
-
-        const jsonString = jsonMatch
-          ? jsonMatch[1] || jsonMatch[0]
-          : responseText;
-        responseData = JSON.parse(jsonString);
-      } catch (parseError) {
-        console.error('Error parsing interaction response:', parseError);
-        // Fallback to simple response
-        responseData = {
-          response: `You interact with the ${objectId}. Nothing unusual happens.`,
-          environmentModifications: null,
-          personalReference: null,
-          revealedChoice: null,
-        };
-      }
+      // Generate structured response
+      const responseData = await generateStructuredContent<InteractionResponse>(
+        prompt,
+        interactionSchema,
+        {
+          temperature: 0.7,
+          maxOutputTokens: 1024,
+          safetySettings,
+        }
+      );
 
       // Cache the response - shorter time since these are more contextual
       await this.cache.set(cacheKey, responseData, 3600); // Cache for 1 hour
@@ -1865,18 +2004,26 @@ export class ContentGenerator {
         state.choices.slice(-3)
       );
 
-      // Send request to LLM
-      const result = await this.model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 512,
+      // Simple schema for text-only response
+      const textResponseSchema = {
+        type: Type.OBJECT,
+        properties: {
+          response: { type: Type.STRING },
         },
-      });
+        propertyOrdering: ['response'],
+      };
 
-      return result.response.text();
+      // Generate content
+      const result = await generateStructuredContent<{ response: string }>(
+        prompt,
+        textResponseSchema,
+        {
+          temperature: 0.7,
+          maxOutputTokens: 512,
+        }
+      );
+
+      return result.response;
     } catch (error) {
       console.error('Error generating narrator response:', error);
       return 'I notice your action, but have nothing particular to say about it right now.';
@@ -1891,44 +2038,37 @@ export class ContentGenerator {
       // Create prompt
       const prompt = PromptTemplates.storyEnding(endingType);
 
-      // Send request to LLM
-      const result = await this.model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.8,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 2048,
+      // Define ending content schema
+      const endingSchema = {
+        type: Type.OBJECT,
+        properties: {
+          title: { type: Type.STRING },
+          narration: { type: Type.STRING },
+          summary: { type: Type.STRING },
+          thematicMessage: { type: Type.STRING },
+          revealedSecrets: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+          },
         },
-      });
+        propertyOrdering: [
+          'title',
+          'narration',
+          'summary',
+          'thematicMessage',
+          'revealedSecrets',
+        ],
+      };
 
-      const responseText = result.response.text();
-
-      // Parse JSON response
-      let responseData: EndingContent;
-
-      try {
-        // Attempt to extract JSON
-        const jsonMatch =
-          responseText.match(/```json\n([\s\S]*?)\n```/) ||
-          responseText.match(/{[\s\S]*}/);
-
-        const jsonString = jsonMatch
-          ? jsonMatch[1] || jsonMatch[0]
-          : responseText;
-        responseData = JSON.parse(jsonString);
-      } catch (parseError) {
-        console.error('Error parsing ending response:', parseError);
-        // Fallback to simple ending
-        responseData = {
-          title: 'The End',
-          narration:
-            "And so your story comes to a close. What you've learned and experienced along the way is yours to interpret.",
-          summary: 'You reached the end of your journey.',
-          thematicMessage: 'Sometimes the end is just another beginning.',
-          revealedSecrets: [],
-        };
-      }
+      // Generate structured ending content
+      const responseData = await generateStructuredContent<EndingContent>(
+        prompt,
+        endingSchema,
+        {
+          temperature: 0.8,
+          maxOutputTokens: 2048,
+        }
+      );
 
       return responseData;
     } catch (error) {
@@ -1960,25 +2100,33 @@ export class ContentGenerator {
         state.choices.slice(-5)
       );
 
-      // Send request to LLM
-      const result = await this.model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.8,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 512,
+      // Simple schema for text-only response
+      const commentarySchema = {
+        type: Type.OBJECT,
+        properties: {
+          commentary: { type: Type.STRING },
         },
-      });
+        propertyOrdering: ['commentary'],
+      };
 
-      return result.response.text();
+      // Generate content with structured output
+      const result = await generateStructuredContent<{ commentary: string }>(
+        prompt,
+        commentarySchema,
+        {
+          temperature: 0.8,
+          maxOutputTokens: 512,
+        }
+      );
+
+      return result.commentary;
     } catch (error) {
       console.error('Error generating meta-commentary:', error);
       return "Did you ever stop to think about why you're making these choices? Just curious.";
     }
   }
 }
-````
+```
 
 ## 4. API Routes Implementation
 
